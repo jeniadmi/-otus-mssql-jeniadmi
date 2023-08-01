@@ -1,1 +1,1 @@
-# -otus-mssql-jeniadmi
+hello
