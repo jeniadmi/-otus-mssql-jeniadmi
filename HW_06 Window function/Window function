@@ -1,0 +1,139 @@
+--1.Сделать расчет суммы продаж нарастающим итогом по месяцам с 2015 года
+--(в рамках одного месяца он будет одинаковый, нарастать будет в течение времени выборки).
+--Нарастающий итог должен быть без оконной функции.
+
+--select Sales.InvoiceLines.InvoiceID, Sales.InvoiceLines.ExtendedPrice, Sales.Invoices.InvoiceDate, YEAR (Sales.Invoices.InvoiceDate) as year, MONTH (Sales.Invoices.InvoiceDate) as month from Sales.InvoiceLines
+--join Sales.Invoices on Sales.InvoiceLines.InvoiceID = Sales.Invoices.InvoiceID
+
+select
+(select sum (Sales.InvoiceLines.ExtendedPrice) from Sales.InvoiceLines
+join Sales.Invoices on Sales.InvoiceLines.InvoiceID = Sales.Invoices.InvoiceID
+WHERE YEAR (SI.InvoiceDate) = YEAR (Sales.Invoices.InvoiceDate) AND YEAR (Sales.Invoices.InvoiceDate) >= 2015
+and month (SI.InvoiceDate) >= month (Sales.Invoices.InvoiceDate)) as cumulative_total,
+sum (SIL.ExtendedPrice) as monthly_amount
+, YEAR (SI.InvoiceDate) as year
+, MONTH (SI.InvoiceDate) as month
+from Sales.InvoiceLines as SIL
+join Sales.Invoices as SI on SIL.InvoiceID = SI.InvoiceID
+group by MONTH (SI.InvoiceDate)
+, YEAR (SI.InvoiceDate)
+having YEAR (SI.InvoiceDate) >= 2015
+order by year (SI.InvoiceDate), MONTH (SI.InvoiceDate)
+
+--2.Сделайте расчет суммы нарастающим итогом в предыдущем запросе с помощью оконной функции.
+--Сравните производительность запросов 1 и 2 с помощью set statistics time, io on
+
+SET STATISTICS TIME ON;
+GO
+SELECT 
+sum (SIL.ExtendedPrice) over (PARTITION BY MONTH (SI.InvoiceDate) ORDER by year (SI.InvoiceDate)) as monthly_amount,
+sum (SIL.ExtendedPrice) over (PARTITION BY year (SI.InvoiceDate) ORDER by MONTH (SI.InvoiceDate)) as cumulative_total
+, YEAR (SI.InvoiceDate) as year
+, MONTH (SI.InvoiceDate) as month
+from Sales.InvoiceLines as SIL
+join Sales.Invoices as SI on SIL.InvoiceID = SI.InvoiceID
+where YEAR (SI.InvoiceDate) >= 2015
+order by year (SI.InvoiceDate), MONTH (SI.InvoiceDate)
+
+--3.Вывести список 2х самых популярных продуктов (по количеству проданных)
+--в каждом месяце за 2016 год (по 2 самых популярных продукта в каждом месяце).
+
+GO
+WITH ProductMonthSales--количество заказанных товаров по месяцам
+AS (
+    SELECT si.StockItemName, 
+        SUM(il.Quantity) AS [TotalQuantity], 
+        MONTH(i.InvoiceDate) AS [MonthNumber]
+    FROM Sales.InvoiceLines il
+        INNER JOIN [Sales].[Invoices] i ON il.InvoiceID = i.InvoiceID 
+        INNER JOIN Warehouse.StockItems si ON il.StockItemID = si.StockItemID
+	WHERE YEAR(i.InvoiceDate) = 2016
+    GROUP BY si.StockItemName, MONTH(i.InvoiceDate)
+),
+ProductSalesNumbered --
+AS (
+    SELECT ProductMonthSales.StockItemName, 
+        ProductMonthSales.TotalQuantity, 
+        ProductMonthSales.MonthNumber, 
+        ROW_NUMBER() OVER(PARTITION BY ProductMonthSales.MonthNumber ORDER BY ProductMonthSales.TotalQuantity DESC) AS [Num]
+    FROM ProductMonthSales
+)
+SELECT psm.StockItemName, psm.TotalQuantity,psm.MonthNumber
+FROM ProductSalesNumbered psm
+WHERE psm.Num <= 2
+ORDER BY psm.MonthNumber, psm.TotalQuantity DESC
+
+--4.Функции одним запросом
+--Посчитайте по таблице товаров (в вывод также должен попасть ид товара, название, брэнд и цена):
+--пронумеруйте записи по названию товара, так чтобы при изменении буквы алфавита нумерация начиналась заново
+--посчитайте общее количество товаров и выведете полем в этом же запросе
+--посчитайте общее количество товаров в зависимости от первой буквы названия товара
+--отобразите следующий id товара исходя из того, что порядок отображения товаров по имени
+--предыдущий ид товара с тем же порядком отображения (по имени)
+--названия товара 2 строки назад, в случае если предыдущей строки нет нужно вывести "No items"
+--сформируйте 30 групп товаров по полю вес товара на 1 шт
+--Для этой задачи НЕ нужно писать аналог без аналитических функций.
+
+GO
+Select StockItemID, StockItemName, Brand, UnitPrice,
+--пронумеруйте записи по названию товара, так чтобы при изменении буквы алфавита нумерация начиналась заново
+ROW_NUMBER() OVER(PARTITION BY LEFT(StockItemName, 1) ORDER BY StockItemName) As [First_number],
+--посчитайте общее количество товаров и выведете полем в этом же запросе
+Count(*) Over() [Total]
+--посчитайте общее количество товаров в зависимости от первой буквы названия товара
+,COUNT(*) OVER(PARTITION BY LEFT(StockItemName, 1)) [First_Item_letter]
+--отобразите следующий id товара исходя из того, что порядок отображения товаров по имени
+,LEAD(StockItemID,1,0) OVER(ORDER BY StockItemName) [Next_ID]
+--предыдущий ид товара с тем же порядком отображения (по имени)
+,LAG(StockItemID,1,0) OVER(ORDER BY StockItemName) [Previos_ID]
+--названия товара 2 строки назад, в случае если предыдущей строки нет нужно вывести "No items"
+,LAG(StockItemName,2,'No items') OVER(ORDER BY StockItemName) [Previos_2rows_ItemsName]
+--сформируйте 30 групп товаров по полю вес товара на 1 шт TypicalWeightPerUnit
+,NTILE(30)OVER(Order BY TypicalWeightPerUnit) [GROUP_30]
+from Warehouse.StockItems
+Order BY StockItemName
+
+--5.По каждому сотруднику выведите последнего клиента, которому сотрудник что-то продал.
+--В результатах должны быть ид и фамилия сотрудника, ид и название клиента, дата продажи, сумму сделки.
+
+GO
+SELECT p.PersonID, 
+       p.FullName, 
+       c.CustomerID, 
+       c.CustomerName, 
+       r.TransactionDate, 
+       r.TransactionAmount
+FROM
+(
+    SELECT i.CustomerID, 
+           i.SalespersonPersonID, 
+           ct.TransactionDate, 
+		   ct.InvoiceID,
+           ct.TransactionAmount, 
+           ROW_NUMBER() OVER(PARTITION BY SalespersonPersonID ORDER BY TransactionDate DESC,  ct.InvoiceID desc) AS [Num]
+    FROM Sales.CustomerTransactions ct
+         INNER JOIN Sales.Invoices i ON ct.InvoiceID = i.InvoiceID
+) AS r
+INNER JOIN Application.People p ON r.SalespersonPersonID = p.PersonID
+INNER JOIN Sales.Customers c ON r.CustomerID = c.CustomerID
+WHERE r.[num] = 1
+
+--6.Выберите по каждому клиенту два самых дорогих товара, которые он покупал.
+--В результатах должно быть ид клиета, его название, ид товара, цена, дата покупки.
+--Опционально можете для каждого запроса без оконных функций сделать вариант запросов с оконными функциями и сравнить их производительность.
+
+GO 
+WITH WindowFilter As
+	(Select si.CustomerID, si.InvoiceDate, sil.StockItemID, sil.ExtendedPrice
+		,rank() OVER(PARTITION BY si.CustomerID ORDER BY sil.ExtendedPrice Desc) [Number]
+	FROM Sales.Invoices si join Sales.InvoiceLines sil on si.InvoiceID=sil.InvoiceID)
+SELECT wf.CustomerID
+	, sc.CustomerName[Name_Customer]
+	, wf.StockItemID
+	, wf.InvoiceDate
+	, wf.ExtendedPrice
+FROM WindowFilter wf 					-- так как построенное окно нужно в качетсве фильтра, то весь запрос заворачиваем во вложенный запрос
+	left join Sales.Customers sc on wf.CustomerID=sc.CustomerID --затем объединим таблицы для определения имя клиента
+	Where Number in (1,2)
+
+Set statistics io, time off
