@@ -1,0 +1,187 @@
+Тема проекта: разработка базы данных и BI-аналитики для анализа финансового состояния предприятий.
+Выбор темы обусловлен необходимостью решения рабочей задачи - в настоящее время обработка, агрегация и анализ данных по перечню показателе осуществляется с помощью ms excel.
+В качестве исходной информации используются exl файлы-источники, которые заполняют предприятия (всего 200 шт) ежемесячно и предоставляют для загрузки и обработки. В каждом файле есть листы (8 листов) со своим перечнем показателей. 
+Есть листы с показателями, которые рассчитываются на ежемесячной основе, а есть листы с квартальными показателями.
+Для оптимизации кол-ва таблиц решено создать сущности по показателям в привязке переодичности их заполнения, а также отдельный лист "Аналитическая записка", который будет
+загружаться в БД после предварительной аггрегации по всем предприятиям. Также в качестве характеристик предусмотрено два главных справочника и несколько дополнительных. 
+В двух главных справочниках присутствует  связь один ко многим по первичному ключу.
+
+--Удаляем Базу данных
+DROP DATABASE [TOP100]
+
+--Проверяем существует ли база, удаляем и создаем заново
+DROP DATABASE IF EXISTS TOP100
+CREATE DATABASE TOP100
+
+--Удаляем все таблицы если они есть
+DROP TABLE IF EXISTS ID_все
+
+CREATE TABLE ID_все
+(
+  ID_показателя INT NOT NULL,
+  ID_листа_в_файле INT NOT NULL,
+  ID_отрасли INT NOT NULL,
+  ID_пользователя INT NOT NULL,
+  ID_организации INT NOT NULL,
+  ID_региона INT NOT NULL,
+  ID_организационно_правовой_формы INT NOT NULL,
+  ID_органа_управления INT NOT NULL,
+  PRIMARY KEY (ID_организации),
+  UNIQUE (ID_листа_в_файле),
+  UNIQUE (ID_отрасли),
+  UNIQUE (ID_пользователя),
+  UNIQUE (ID_региона),
+  UNIQUE (ID_организационно_правовой_формы),
+  UNIQUE (ID_органа_управления)
+);
+DROP TABLE IF EXISTS Справочник_отраслей
+CREATE TABLE Справочник_отраслей
+(
+  Сокращенное_наименование_отрасли VARCHAR(50) NOT NULL,
+  ID_отрасли INT NOT NULL,
+  ОКЭД INT NOT NULL,
+  Наименование_ОКЭД VARCHAR(100) NOT NULL,
+  Полное_наименование_отрасли VARCHAR(100) NOT NULL,
+  Группа_отрасли INT NOT NULL,
+  ID_организации INT NOT NULL,
+  PRIMARY KEY (ID_организации)
+);
+DROP TABLE IF EXISTS Справочник_регионов
+CREATE TABLE Справочник_регионов
+(
+  ID_организации INT NOT NULL,
+  Регион VARCHAR(50) NOT NULL,
+  ID_региона INT NOT NULL,
+  PRIMARY KEY (ID_организации),
+  UNIQUE (ID_региона)
+);
+DROP TABLE IF EXISTS Справочник_пользователей
+CREATE TABLE Справочник_пользователей
+(
+  ID_пользователя INT NOT NULL,
+  Наименование_пользователя VARCHAR(100) NOT NULL,
+  Номер_компьютера VARCHAR(50) NOT NULL,
+  ID_организации INT NOT NULL,
+  PRIMARY KEY (ID_организации)
+);
+DROP TABLE IF EXISTS Справочник_организационно_правовой_формы
+CREATE TABLE Справочник_организационно_правовой_формы
+(
+  ID_организационно_правовой_формы INT NOT NULL,
+  Полное_наименование_организационно_правовой_формы VARCHAR(100) NOT NULL,
+  Сокращенное_наименование_организационно_правовой_формы VARCHAR(50) NOT NULL,
+  ID_организации INT NOT NULL,
+  PRIMARY KEY (ID_организации)
+);
+DROP TABLE IF EXISTS Справочник_органа_управления
+CREATE TABLE Справочник_органа_управления
+(
+  ID_органа_управления INT NOT NULL,
+  ID_организации INT NOT NULL,
+  Полное_наименование_органа_управления VARCHAR(100) NOT NULL,
+  Сокращенное_наименование_наименование_органа_управления VARCHAR(50) NOT NULL,
+  PRIMARY KEY (ID_организации)
+);
+DROP TABLE IF EXISTS Ежемесячные_показатели_за_месяц
+CREATE TABLE Ежемесячные_показатели_за_месяц
+(
+  ID_показателя INT NOT NULL,
+  ID_организации INT NOT NULL,
+  Дата_показателя DATE NOT NULL,
+  Значение NUMERIC(15, 2) NOT NULL,
+  Код_строки_из_файла INT NOT NULL,
+  ID_листа_в_файле INT NOT NULL,
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации)
+);
+DROP TABLE IF EXISTS Ежемесячные_показатели_нарастающим
+CREATE TABLE Ежемесячные_показатели_нарастающим
+(
+  ID_организации INT NOT NULL,
+  ID_показателя INT NOT NULL,
+  Дата_показателя DATE NOT NULL,
+  Значение NUMERIC(15, 2) NOT NULL,
+  Код_строки_из_файла INT NOT NULL,
+  ID_листа_в_файле INT NOT NULL,
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации)
+);
+DROP TABLE IF EXISTS Аналитическая_записка
+CREATE TABLE Аналитическая_записка
+(
+  ID_организации INT NOT NULL,
+  Дата_показателя DATE NOT NULL,
+  Значение NUMERIC(15, 2) NOT NULL,
+  ID_показателя INT NOT NULL,
+  ID_листа_в_файле INT NOT NULL,
+  Код_строки_из_файла INT NOT NULL,
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации)
+);
+DROP TABLE IF EXISTS История_изменений
+CREATE TABLE История_изменений
+(
+  ID_организации INT NOT NULL,
+  ID_показателя INT NOT NULL,
+  ID_листа_в_файле INT NOT NULL,
+  Значение_до_изменений NUMERIC(15, 2) NOT NULL,
+  Значение_после_изменений NUMERIC(15,2) NOT NULL,
+  Дата_изменений DATE NOT NULL,
+  ID_пользователя INT NOT NULL,
+  Дата_показателя DATE NOT NULL,
+  FOREIGN KEY (ID_организации) REFERENCES Справочник_пользователей(ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации)
+);
+DROP TABLE IF EXISTS Справочник_организаций
+CREATE TABLE Справочник_организаций
+(
+  ID_организации INT NOT NULL,
+  Наименование_организации VARCHAR(100) NOT NULL,
+  УНП_организации INT NOT NULL,
+  Вид_экономической_деятельности INT NOT NULL,
+  ID_организационно_правовой_формы INT NOT NULL,
+  ID_органа_управления INT NOT NULL,
+  Контактное_лицо VARCHAR(100) NOT NULL,
+  ID_отрасли INT NOT NULL,
+  ID_региона INT NOT NULL,
+  PRIMARY KEY (ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES Справочник_регионов(ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES Справочник_органа_управления(ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES Справочник_организационно_правовой_формы(ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES Справочник_отраслей(ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации),
+  UNIQUE (ID_организационно_правовой_формы),
+  UNIQUE (ID_органа_управления),
+  UNIQUE (ID_отрасли),
+  UNIQUE (ID_региона)
+);
+DROP TABLE IF EXISTS Справочник_показателей
+CREATE TABLE Справочник_показателей
+(
+  Наименование_показателя VARCHAR(100) NOT NULL,
+  Код_строки_из_файла INT NOT NULL,
+  ID_показателя INT NOT NULL,
+  Единица_измерения_показателя VARCHAR(50) NOT NULL,
+  ID_листа_из_файла INT NOT NULL,
+  ID_организации INT NOT NULL,
+  PRIMARY KEY (ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации),
+  UNIQUE (ID_листа_из_файла)
+);
+DROP TABLE IF EXISTS Справочник_листов_в_файле
+CREATE TABLE Справочник_листов_в_файле
+(
+  Наименование_листа_файла VARCHAR(50) NOT NULL,
+  ID_листа_из_файла INT NOT NULL,
+  ID_организации INT NOT NULL,
+  PRIMARY KEY (ID_организации),
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации)
+);
+DROP TABLE IF EXISTS Квартальные_показатели_нарастающим_итогом
+CREATE TABLE Квартальные_показатели_нарастающим_итогом
+(
+  ID_организации INT NOT NULL,
+  ID_показателя INT NOT NULL,
+  Код_строки_из_файла INT NOT NULL,
+  ID_листа_в_файле INT NOT NULL,
+  Дата_показателя DATE NOT NULL,
+  Значение NUMERIC(15, 2) NOT NULL,
+  FOREIGN KEY (ID_организации) REFERENCES ID_все(ID_организации)
+);
